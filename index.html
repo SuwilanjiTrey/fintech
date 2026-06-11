@@ -1,0 +1,377 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: transparent; }
+
+#app { padding: 1rem 0; }
+
+#viewfinder-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  background: #0a0a0a;
+  border-radius: var(--border-radius-lg);
+  overflow: hidden;
+  border: 0.5px solid var(--color-border-tertiary);
+}
+#video { width: 100%; height: 100%; object-fit: cover; display: block; }
+#canvas { display: none; }
+
+.reticle {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 78%; height: 34%;
+  pointer-events: none;
+}
+.reticle::before, .reticle::after,
+.reticle .b::before, .reticle .b::after {
+  content: ''; position: absolute;
+  width: 18px; height: 18px;
+  border-color: #22c55e;
+  border-style: solid;
+}
+.reticle::before { top: 0; left: 0; border-width: 2px 0 0 2px; }
+.reticle::after  { top: 0; right: 0; border-width: 2px 2px 0 0; }
+.reticle .b::before { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+.reticle .b::after  { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+.scan-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #22c55e88, #22c55e, #22c55e88, transparent);
+  animation: scan 2s ease-in-out infinite;
+  top: 50%;
+}
+@keyframes scan {
+  0%   { transform: translateY(-140%); opacity: 1; }
+  100% { transform: translateY(140%); opacity: 0.4; }
+}
+
+.status-pill {
+  position: absolute;
+  bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.72);
+  color: #a3a3a3;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 99px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.status-pill.active { color: #22c55e; }
+.status-pill.found  { color: #facc15; }
+
+#btn-row {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0;
+}
+#btn-scan, #btn-clear {
+  flex: 1;
+  padding: 10px;
+  border-radius: var(--border-radius-md);
+  border: 0.5px solid var(--color-border-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  transition: background 0.15s;
+}
+#btn-scan.scanning {
+  border-color: #22c55e;
+  color: #22c55e;
+  background: rgba(34,197,94,0.08);
+}
+#btn-clear {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  color: var(--color-text-secondary);
+}
+
+#results { display: flex; flex-direction: column; gap: 8px; }
+
+.result-card {
+  background: var(--color-background-primary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: var(--border-radius-lg);
+  padding: 12px 14px;
+  animation: slideIn 0.2s ease;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.result-card .txn-id {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: #22c55e;
+  font-weight: 500;
+  word-break: break-all;
+}
+.result-card .amount {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  font-weight: 500;
+  margin-top: 4px;
+}
+.result-card .meta {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.result-card .parsed {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  border: 0.5px solid var(--color-border-tertiary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+#empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+#empty-state i { font-size: 32px; display: block; margin-bottom: 8px; opacity: 0.4; }
+
+#no-camera {
+  display: none;
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+#no-camera i { font-size: 32px; display: block; margin: 0 auto 8px; opacity: 0.5; }
+</style>
+
+<h2 class="sr-only">Mobile money transaction ID scanner</h2>
+<div id="app">
+
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <div class="reticle"><div class="b"></div></div>
+    <div class="scan-line" id="scan-line" style="display:none"></div>
+    <div class="status-pill" id="status-pill">Tap "Start scan" to begin</div>
+    <div id="no-camera">
+      <i class="ti ti-camera-off" aria-hidden="true"></i>
+      Camera unavailable or permission denied
+    </div>
+  </div>
+
+  <div id="btn-row">
+    <button id="btn-scan" onclick="toggleScan()">
+      <i class="ti ti-scan" aria-hidden="true"></i> Start scan
+    </button>
+    <button id="btn-clear" onclick="clearResults()" title="Clear all results">
+      <i class="ti ti-trash" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <div id="results">
+    <div id="empty-state">
+      <i class="ti ti-receipt" aria-hidden="true"></i>
+      Scanned transactions will appear here
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+let scanning = false;
+let scanInterval = null;
+let worker = null;
+let stream = null;
+let results = [];
+let workerReady = false;
+let scanCount = 0;
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusPill = document.getElementById('status-pill');
+const btnScan = document.getElementById('btn-scan');
+const scanLine = document.getElementById('scan-line');
+const resultsEl = document.getElementById('results');
+const noCam = document.getElementById('no-camera');
+
+const TXN_REGEX = /(?:TXN\.?\s*ID\s*[:.]?\s*|TID\s*[:.]?\s*TXN\.?\s*ID\s*[:.]?\s*)(MP\d{6}\.\d{4}\.[A-Z0-9]+)/gi;
+const AMOUNT_REGEX = /Payment\s+of\s+ZMW\s+([\d,]+(?:\.\d{1,2})?)/gi;
+
+async function initWorker() {
+  try {
+    worker = await Tesseract.createWorker('eng', 1, {
+      logger: () => {}
+    });
+    workerReady = true;
+    setStatus('Ready — point at a transaction receipt', false);
+  } catch(e) {
+    setStatus('OCR engine failed to load', false);
+  }
+}
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    noCam.style.display = 'none';
+    await initWorker();
+  } catch(e) {
+    video.style.display = 'none';
+    noCam.style.display = 'block';
+    setStatus('Camera unavailable', false);
+  }
+}
+
+function setStatus(msg, active, found) {
+  statusPill.textContent = msg;
+  statusPill.className = 'status-pill' + (active ? ' active' : '') + (found ? ' found' : '');
+}
+
+async function toggleScan() {
+  if (!stream) {
+    await startCamera();
+    return;
+  }
+  if (scanning) {
+    stopScan();
+  } else {
+    startScan();
+  }
+}
+
+function startScan() {
+  if (!workerReady) { setStatus('OCR engine still loading…', true); return; }
+  scanning = true;
+  btnScan.classList.add('scanning');
+  btnScan.innerHTML = '<i class="ti ti-player-pause" aria-hidden="true"></i> Stop scan';
+  scanLine.style.display = 'block';
+  setStatus('Scanning…', true);
+  scanInterval = setInterval(captureAndScan, 1800);
+  captureAndScan();
+}
+
+function stopScan() {
+  scanning = false;
+  clearInterval(scanInterval);
+  btnScan.classList.remove('scanning');
+  btnScan.innerHTML = '<i class="ti ti-scan" aria-hidden="true"></i> Start scan';
+  scanLine.style.display = 'none';
+  setStatus('Paused', false);
+}
+
+async function captureAndScan() {
+  if (!scanning || !workerReady) return;
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+
+  const vw = canvas.width, vh = canvas.height;
+  const rw = Math.round(vw * 0.78), rh = Math.round(vh * 0.34);
+  const rx = Math.round((vw - rw) / 2), ry = Math.round((vh - rh) / 2);
+  ctx.drawImage(video, 0, 0, vw, vh);
+
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = rw; cropCanvas.height = rh;
+  const cc = cropCanvas.getContext('2d');
+  cc.filter = 'contrast(1.6) brightness(1.1) grayscale(1)';
+  cc.drawImage(canvas, rx, ry, rw, rh, 0, 0, rw, rh);
+
+  try {
+    const { data: { text } } = await worker.recognize(cropCanvas);
+    processText(text);
+  } catch(e) {}
+}
+
+function processText(text) {
+  if (!text || text.trim().length < 4) return;
+
+  const txnMatches = [...text.matchAll(TXN_REGEX)];
+  const amtMatches = [...text.matchAll(AMOUNT_REGEX)];
+
+  if (txnMatches.length === 0 && amtMatches.length === 0) {
+    setStatus('Scanning… no match yet', true);
+    return;
+  }
+
+  const txnId = txnMatches.length > 0 ? txnMatches[0][1] : null;
+  const amount = amtMatches.length > 0 ? amtMatches[0][1] : null;
+
+  if (!txnId) { setStatus('Amount found — still looking for TXN ID…', true, true); return; }
+
+  const alreadySaved = results.find(r => r.txnId === txnId);
+  if (alreadySaved) {
+    setStatus('Already captured — keep scanning', true);
+    return;
+  }
+
+  const parsed = parseTxnId(txnId);
+  const entry = { txnId, amount, parsed, time: new Date() };
+  results.unshift(entry);
+  renderResults();
+  setStatus('Captured! Keep scanning for more', false, true);
+  setTimeout(() => { if (scanning) setStatus('Scanning…', true); }, 2000);
+}
+
+function parseTxnId(id) {
+  const m = id.match(/MP(\d{2})(\d{2})(\d{2})\.(\d{2})(\d{2})\.(.+)/);
+  if (!m) return null;
+  const [, yy, mm, dd, hh, min, code] = m;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const mo = months[parseInt(mm,10)-1] || mm;
+  return { date: `${dd} ${mo} 20${yy}`, time: `${hh}:${min}`, code };
+}
+
+function renderResults() {
+  if (results.length === 0) {
+    resultsEl.innerHTML = '<div id="empty-state"><i class="ti ti-receipt" aria-hidden="true"></i>Scanned transactions will appear here</div>';
+    return;
+  }
+  resultsEl.innerHTML = results.map((r, i) => {
+    const p = r.parsed;
+    const scannedAt = r.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `<div class="result-card">
+      <div class="txn-id">${r.txnId}</div>
+      ${r.amount ? `<div class="amount">ZMW ${r.amount}</div>` : '<div class="amount" style="color:var(--color-text-secondary)">Amount not found</div>'}
+      ${p ? `<div class="parsed">
+        <span class="tag">${p.date}</span>
+        <span class="tag">${p.time}</span>
+        <span class="tag">${p.code}</span>
+      </div>` : ''}
+      <div class="meta">
+        <i class="ti ti-clock" style="font-size:12px" aria-hidden="true"></i>
+        Scanned at ${scannedAt}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function clearResults() {
+  results = [];
+  renderResults();
+}
+
+startCamera();
+</script>
